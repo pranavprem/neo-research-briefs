@@ -28,9 +28,9 @@ can skim it once and understand the code.
 
 - `models.py` owns the `ResearchBrief` dataclass and the `BriefStatus`
   enum. No I/O. No adapter imports.
-- `adapters/` each expose a small, mockable class. Only the Obsidian
-  adapter is fully implemented in v1; the others are documented stubs
-  that raise `NotImplementedError` from their network methods.
+- `adapters/` each expose a small, mockable class. All four adapters
+  are usable in v1: Notion and Discord speak REST, GitHub uses `gh`
+  or REST, and Obsidian works directly on vault files.
 - `services/watcher.py` holds the control flow. It collects briefs from
   whichever adapters are enabled, decides what to do with each one,
   and emits a `WatcherReport`.
@@ -90,8 +90,8 @@ never a stampede.
 - Exceptions raised by an adapter are caught by the watcher and
   recorded as an `error` action on that one brief. The watcher does
   not re-raise; one bad brief must not poison the whole cycle.
-- `NotImplementedError` is treated as a friendly error, not a crash.
-  That is how the Notion/Discord/GitHub stubs behave today.
+- Adapter exceptions are recorded as brief-level errors, not process
+  crashes.
 - The watcher never retries. The next scheduled run is the retry.
 
 ## Extension points

@@ -487,9 +487,9 @@ More detail and triage runbooks in [`docs/runbook.md`](docs/runbook.md).
 │       ├── cli.py
 │       ├── adapters/
 │       │   ├── __init__.py
-│       │   ├── notion.py       # stub
-│       │   ├── discord.py      # stub
-│       │   ├── github.py       # stub
+│       │   ├── notion.py
+│       │   ├── discord.py
+│       │   ├── github.py
 │       │   └── obsidian.py
 │       └── services/
 │           ├── __init__.py
@@ -503,10 +503,10 @@ More detail and triage runbooks in [`docs/runbook.md`](docs/runbook.md).
     └── test_obsidian.py
 ```
 
-`notion.py`, `discord.py`, and `github.py` are deliberately stubs in
-v1. They define the adapter surface and raise `NotImplementedError`
-from network methods so the watcher's control flow is fully testable
-without mocking an HTTP client. Fill them in when you are ready.
+All four adapters are usable in v1. Notion, Discord, and GitHub talk
+to their live APIs, while Obsidian works directly on vault files. The
+interfaces are still small and mockable so the watcher's control flow
+stays easy to test.
 
 ## 13. Smoke test before going live
 

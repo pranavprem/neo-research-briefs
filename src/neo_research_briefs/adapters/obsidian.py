@@ -1,8 +1,7 @@
 """Obsidian adapter.
 
-Unlike the other adapters in v1, this one is real: Obsidian vaults are
-just folders of Markdown files, so there is no network dependency to
-stub. The adapter can:
+Obsidian vaults are just folders of Markdown files, so the adapter can
+stay pleasantly boring. It can:
 
 - walk a vault's briefs folder,
 - parse a file's YAML-ish frontmatter block,

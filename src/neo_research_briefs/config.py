@@ -7,8 +7,8 @@ read if present, but real environment variables always win so that
 operators can override one value without editing the file.
 
 There is no third-party YAML or TOML parsing here on purpose: the
-``.env`` format is narrow enough that a ~30 line parser is safer than
-an optional dependency that might not be installed on the watcher host.
+``.env`` format is narrow enough that a tiny parser is safer than an
+optional dependency that might not be installed on the watcher host.
 """
 
 from __future__ import annotations
@@ -19,9 +19,6 @@ from pathlib import Path
 from typing import Iterable
 
 
-# Adapters the user can toggle. Keep the set closed so that typos in
-# ``NEO_BRIEFS_ENABLED_ADAPTERS`` surface as config errors, not as a
-# silent "that adapter is simply off".
 KNOWN_ADAPTERS: frozenset[str] = frozenset({"notion", "discord", "github", "obsidian"})
 
 
@@ -33,8 +30,23 @@ class ConfigError(ValueError):
 class NotionConfig:
     token: str | None = None
     database_id: str | None = None
+    api_base: str = "https://api.notion.com/v1"
+    notion_version: str = "2022-06-28"
     status_property: str = "Status"
     want_value: str = "Want"
+    implementing_value: str = "Implementing"
+    title_property: str = "Name"
+    summary_property: str = "Summary"
+    why_it_matters_property: str = "Why it matters"
+    source_url_property: str = "Source URL"
+    target_repo_property: str = "Target Repo"
+    discord_thread_url_property: str = "Discord Thread URL"
+    github_issue_url_property: str = "GitHub Issue URL"
+    github_pr_url_property: str = "GitHub PR URL"
+    claimed_by_property: str = "Claimed By"
+    claimed_at_property: str = "Claimed At"
+    last_sync_at_property: str = "Last Sync At"
+    error_property: str = "Error"
 
     def is_configured(self) -> bool:
         return bool(self.token and self.database_id)
@@ -44,6 +56,9 @@ class NotionConfig:
 class DiscordConfig:
     bot_token: str | None = None
     intake_channel_id: str | None = None
+    api_base: str = "https://discord.com/api/v10"
+    auto_archive_duration: int = 1440
+    starter_message_history_limit: int = 10
 
     def is_configured(self) -> bool:
         return bool(self.bot_token and self.intake_channel_id)
@@ -53,11 +68,11 @@ class DiscordConfig:
 class GitHubConfig:
     token: str | None = None
     default_repo: str | None = None
+    api_base: str = "https://api.github.com"
+    prefer_gh_cli: bool = True
 
     def is_configured(self) -> bool:
-        # ``gh auth login`` can provide credentials without a token env var,
-        # so we only require a default repo to consider GitHub wired.
-        return bool(self.default_repo)
+        return bool(self.default_repo and (self.prefer_gh_cli or self.token))
 
 
 @dataclass(slots=True)
@@ -71,11 +86,6 @@ class ObsidianConfig:
         return self.vault_path is not None
 
     def briefs_dir(self) -> Path:
-        """Absolute path to the folder that holds research briefs.
-
-        Raises :class:`ConfigError` if the vault is not configured, so
-        callers never have to handle an optional path themselves.
-        """
         if self.vault_path is None:
             raise ConfigError("Obsidian vault is not configured")
         return self.vault_path / self.briefs_folder
@@ -92,14 +102,8 @@ class Config:
     github: GitHubConfig = field(default_factory=GitHubConfig)
     obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
 
-    # ------------------------------------------------------------------
-
     def validate(self) -> list[str]:
-        """Return a list of human-readable problems; empty means OK.
-
-        We return errors rather than raising so that the ``validate``
-        CLI command can print all problems at once.
-        """
+        """Return a list of human-readable problems; empty means OK."""
         problems: list[str] = []
 
         unknown = self.enabled_adapters - KNOWN_ADAPTERS
@@ -123,7 +127,15 @@ class Config:
                 "DISCORD_INTAKE_CHANNEL_ID missing"
             )
         if "github" in self.enabled_adapters and not self.github.is_configured():
-            problems.append("github adapter enabled but GITHUB_DEFAULT_REPO missing")
+            if self.github.prefer_gh_cli:
+                problems.append(
+                    "github adapter enabled but GITHUB_DEFAULT_REPO missing "
+                    "(and gh auth is only used after a repo is configured)"
+                )
+            else:
+                problems.append(
+                    "github adapter enabled but GITHUB_DEFAULT_REPO / GITHUB_TOKEN missing"
+                )
         if "obsidian" in self.enabled_adapters:
             if self.obsidian.vault_path is None:
                 problems.append("obsidian adapter enabled but OBSIDIAN_VAULT_PATH missing")
@@ -132,11 +144,22 @@ class Config:
                     f"OBSIDIAN_VAULT_PATH does not exist: {self.obsidian.vault_path}"
                 )
 
+        if not self.notion.api_base.startswith(("http://", "https://")):
+            problems.append(f"NOTION_API_BASE must be an http(s) URL, got {self.notion.api_base!r}")
+        if not self.discord.api_base.startswith(("http://", "https://")):
+            problems.append(
+                f"DISCORD_API_BASE must be an http(s) URL, got {self.discord.api_base!r}"
+            )
+        if not self.github.api_base.startswith(("http://", "https://")):
+            problems.append(f"GITHUB_API_BASE must be an http(s) URL, got {self.github.api_base!r}")
+        if self.discord.auto_archive_duration not in {60, 1440, 4320, 10080}:
+            problems.append(
+                "DISCORD_AUTO_ARCHIVE_DURATION must be one of 60, 1440, 4320, 10080"
+            )
+        if self.discord.starter_message_history_limit < 1:
+            problems.append("DISCORD_STARTER_MESSAGE_HISTORY_LIMIT must be >= 1")
+
         return problems
-
-
-# ---------------------------------------------------------------------------
-# Loading
 
 
 def load_config(
@@ -144,13 +167,7 @@ def load_config(
     *,
     dotenv_path: Path | None = None,
 ) -> Config:
-    """Build a :class:`Config` from environment variables.
-
-    ``environ`` defaults to ``os.environ``. Overriding it is the main
-    hook tests use to avoid polluting the real environment. If
-    ``dotenv_path`` is given and the file exists, its entries populate
-    any keys that are not already set in ``environ``.
-    """
+    """Build a :class:`Config` from environment variables."""
     env: dict[str, str] = dict(os.environ if environ is None else environ)
 
     if dotenv_path is not None and dotenv_path.exists():
@@ -169,16 +186,63 @@ def load_config(
         notion=NotionConfig(
             token=_clean(env.get("NOTION_TOKEN")),
             database_id=_clean(env.get("NOTION_DATABASE_ID")),
+            api_base=env.get("NOTION_API_BASE", "https://api.notion.com/v1").strip()
+            or "https://api.notion.com/v1",
+            notion_version=env.get("NOTION_VERSION", "2022-06-28").strip() or "2022-06-28",
             status_property=env.get("NOTION_STATUS_PROPERTY", "Status").strip() or "Status",
             want_value=env.get("NOTION_WANT_VALUE", "Want").strip() or "Want",
+            implementing_value=env.get("NOTION_IMPLEMENTING_VALUE", "Implementing").strip()
+            or "Implementing",
+            title_property=env.get("NOTION_TITLE_PROPERTY", "Name").strip() or "Name",
+            summary_property=env.get("NOTION_SUMMARY_PROPERTY", "Summary").strip() or "Summary",
+            why_it_matters_property=env.get(
+                "NOTION_WHY_IT_MATTERS_PROPERTY", "Why it matters"
+            ).strip()
+            or "Why it matters",
+            source_url_property=env.get("NOTION_SOURCE_URL_PROPERTY", "Source URL").strip()
+            or "Source URL",
+            target_repo_property=env.get("NOTION_TARGET_REPO_PROPERTY", "Target Repo").strip()
+            or "Target Repo",
+            discord_thread_url_property=env.get(
+                "NOTION_DISCORD_THREAD_URL_PROPERTY", "Discord Thread URL"
+            ).strip()
+            or "Discord Thread URL",
+            github_issue_url_property=env.get(
+                "NOTION_GITHUB_ISSUE_URL_PROPERTY", "GitHub Issue URL"
+            ).strip()
+            or "GitHub Issue URL",
+            github_pr_url_property=env.get(
+                "NOTION_GITHUB_PR_URL_PROPERTY", "GitHub PR URL"
+            ).strip()
+            or "GitHub PR URL",
+            claimed_by_property=env.get("NOTION_CLAIMED_BY_PROPERTY", "Claimed By").strip()
+            or "Claimed By",
+            claimed_at_property=env.get("NOTION_CLAIMED_AT_PROPERTY", "Claimed At").strip()
+            or "Claimed At",
+            last_sync_at_property=env.get(
+                "NOTION_LAST_SYNC_AT_PROPERTY", "Last Sync At"
+            ).strip()
+            or "Last Sync At",
+            error_property=env.get("NOTION_ERROR_PROPERTY", "Error").strip() or "Error",
         ),
         discord=DiscordConfig(
             bot_token=_clean(env.get("DISCORD_BOT_TOKEN")),
             intake_channel_id=_clean(env.get("DISCORD_INTAKE_CHANNEL_ID")),
+            api_base=env.get("DISCORD_API_BASE", "https://discord.com/api/v10").strip()
+            or "https://discord.com/api/v10",
+            auto_archive_duration=_parse_int(
+                env.get("DISCORD_AUTO_ARCHIVE_DURATION"), default=1440
+            ),
+            starter_message_history_limit=_parse_int(
+                env.get("DISCORD_STARTER_MESSAGE_HISTORY_LIMIT"), default=10
+            ),
         ),
         github=GitHubConfig(
             token=_clean(env.get("GITHUB_TOKEN")),
             default_repo=_clean(env.get("GITHUB_DEFAULT_REPO")),
+            api_base=env.get("GITHUB_API_BASE", "https://api.github.com").strip()
+            or "https://api.github.com",
+            prefer_gh_cli=_parse_bool(env.get("GITHUB_PREFER_GH_CLI"), default=True),
         ),
         obsidian=ObsidianConfig(
             vault_path=vault_path,
@@ -188,10 +252,6 @@ def load_config(
             want_value=env.get("OBSIDIAN_WANT_VALUE", "want").strip() or "want",
         ),
     )
-
-
-# ---------------------------------------------------------------------------
-# parsers
 
 
 _TRUE = frozenset({"1", "true", "yes", "y", "on"})
@@ -223,8 +283,8 @@ def _parse_int(value: str | None, *, default: int) -> int:
 def _parse_adapter_set(value: str | None) -> frozenset[str]:
     if value is None:
         return frozenset({"obsidian"})
-    parts = [p.strip().lower() for p in value.split(",")]
-    return frozenset(p for p in parts if p)
+    parts = [part.strip().lower() for part in value.split(",")]
+    return frozenset(part for part in parts if part)
 
 
 def _clean(value: str | None) -> str | None:
@@ -234,19 +294,8 @@ def _clean(value: str | None) -> str | None:
     return stripped or None
 
 
-# ---------------------------------------------------------------------------
-# minimal .env parser
-
-
 def _read_dotenv(path: Path) -> dict[str, str]:
-    """Parse a ``.env`` file.
-
-    Supports ``KEY=value`` lines with optional surrounding single or
-    double quotes, ``#`` comments, and blank lines. Anything more exotic
-    (exports, variable expansion, multi-line values) is intentionally
-    unsupported - operators who need that should use a real shell or a
-    real loader.
-    """
+    """Parse a small ``.env`` file."""
     result: dict[str, str] = {}
     for raw_line in _iter_lines(path):
         line = raw_line.strip()

@@ -28,10 +28,17 @@ def test_load_config_defaults_to_obsidian_only_dry_run() -> None:
 
 def test_load_config_parses_booleans_and_ints() -> None:
     config = load_config(
-        environ={"NEO_BRIEFS_DRY_RUN": "false", "NEO_BRIEFS_MAX_PER_RUN": "7"}
+        environ={
+            "NEO_BRIEFS_DRY_RUN": "false",
+            "NEO_BRIEFS_MAX_PER_RUN": "7",
+            "GITHUB_PREFER_GH_CLI": "false",
+            "DISCORD_AUTO_ARCHIVE_DURATION": "4320",
+        }
     )
     assert config.dry_run is False
     assert config.max_per_run == 7
+    assert config.github.prefer_gh_cli is False
+    assert config.discord.auto_archive_duration == 4320
 
 
 @pytest.mark.parametrize(
@@ -78,6 +85,18 @@ def test_validate_reports_missing_notion_credentials() -> None:
     config = load_config(environ={"NEO_BRIEFS_ENABLED_ADAPTERS": "notion"})
     problems = config.validate()
     assert any("notion" in p.lower() for p in problems)
+
+
+def test_validate_reports_missing_github_token_when_cli_disabled() -> None:
+    config = load_config(
+        environ={
+            "NEO_BRIEFS_ENABLED_ADAPTERS": "github",
+            "GITHUB_DEFAULT_REPO": "octo/cat",
+            "GITHUB_PREFER_GH_CLI": "false",
+        }
+    )
+    problems = config.validate()
+    assert any("GITHUB_DEFAULT_REPO / GITHUB_TOKEN" in p for p in problems)
 
 
 def test_validate_reports_missing_obsidian_vault() -> None:
@@ -142,6 +161,7 @@ def test_load_config_reads_dotenv_without_overriding_real_env(tmp_path: Path) ->
     assert config.notion.token == "quoted-secret"
     assert config.max_per_run == 5
     assert config.obsidian.briefs_folder == "Briefs Archive"
+    assert config.notion.implementing_value == "Implementing"
 
 
 def test_known_adapters_is_closed_set() -> None:

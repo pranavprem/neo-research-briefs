@@ -163,8 +163,6 @@ class Watcher:
         if self.obsidian is not None and "obsidian" in self.config.enabled_adapters:
             briefs.extend(self.obsidian.list_want_briefs())
         if self.notion is not None and "notion" in self.config.enabled_adapters:
-            # Notion is still a stub; pulling briefs from it raises
-            # NotImplementedError which is the correct signal for now.
             briefs.extend(self.notion.list_want_briefs())
         return briefs
 
@@ -186,9 +184,7 @@ class Watcher:
                 ),
             )
 
-        # Real execution path. The adapter methods that touch the
-        # network are still stubs; the structure here is what v1 pins
-        # down so the fill-in is a narrow change later.
+        # Real execution path.
         thread_url: str | None = None
         issue_url: str | None = None
         try:
