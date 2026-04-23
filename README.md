@@ -77,22 +77,36 @@ Optional but strongly recommended:
 
 ## 0. Install
 
+Manual path:
+
 ```bash
 git clone https://github.com/<you>/neo-research-briefs
 cd neo-research-briefs
 python -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
-```
-
-Copy the environment template:
-
-```bash
 cp .env.example .env
 ```
 
+Or use the repo bootstrap:
+
+```bash
+git clone https://github.com/<you>/neo-research-briefs
+cd neo-research-briefs
+bash scripts/bootstrap.sh
+```
+
 Then edit `.env` to enable the adapters you use. `NEO_BRIEFS_DRY_RUN`
-stays `true` by default - do not flip it until the dry-run output
+stays `true` by default, do not flip it until the dry-run output
 looks right.
+
+The wrapper command used throughout the rest of this README is:
+
+```bash
+bash scripts/run_neo_briefs.sh --json validate-config
+```
+
+That wrapper works even if the repo has only been cloned and not yet
+installed into the active shell.
 
 ## 1. Pick an intake source
 
@@ -330,51 +344,59 @@ idempotency fence.
 
 Use OpenClaw cron for exact timing. Five minutes is a good default.
 
-Example shape:
+The easiest path is to let the repo emit the job for you:
 
-```json
-{
-  "name": "research-brief-intake",
-  "schedule": {
-    "kind": "every",
-    "everyMs": 300000
-  },
-  "sessionTarget": "isolated",
-  "payload": {
-    "kind": "agentTurn",
-    "message": "Run `neo-briefs run-once --json`. Report the JSON summary."
-  },
-  "delivery": {
-    "mode": "none"
-  }
-}
+```bash
+bash scripts/run_neo_briefs.sh --json emit-openclaw-cron --repo-dir "$PWD"
 ```
 
-You can also use a named persistent session if you want continuity,
-but isolated runs are a good starting point.
+That prints a ready-to-paste job object that tells another OpenClaw to
+run the wrapper command in this repo:
+
+```bash
+bash scripts/run_neo_briefs.sh --json run-once
+```
+
+You can customize the emitted job too:
+
+```bash
+bash scripts/run_neo_briefs.sh --json emit-openclaw-cron \
+  --repo-dir "$PWD" \
+  --every-minutes 10 \
+  --session-target isolated \
+  --delivery-mode none
+```
+
+More detail, including bootstrap and safety-scan guidance, lives in
+[`docs/openclaw.md`](docs/openclaw.md).
 
 ## 8. CLI cheat sheet
 
-The reference implementation ships a `neo-briefs` command with three
-subcommands:
+The reference implementation ships a `neo-briefs` command plus a small
+wrapper script at `scripts/run_neo_briefs.sh`.
 
 ```bash
 # Validate configuration; exits non-zero on problems.
-neo-briefs validate-config
+bash scripts/run_neo_briefs.sh --json validate-config
 
 # Scan the Obsidian vault and list what parses, what does not, and
 # which briefs are currently marked Want.
-neo-briefs obsidian --show-want-only
+bash scripts/run_neo_briefs.sh --json obsidian --show-want-only
 
 # Run one watcher cycle. Safe by default: NEO_BRIEFS_DRY_RUN=true.
-neo-briefs run-once --dry-run
+bash scripts/run_neo_briefs.sh --json run-once --dry-run
 
 # Real execution. Only flip this once the dry run looks right.
-neo-briefs run-once --no-dry-run
+bash scripts/run_neo_briefs.sh --json run-once --no-dry-run
+
+# Emit a ready-to-paste OpenClaw cron job.
+bash scripts/run_neo_briefs.sh --json emit-openclaw-cron --repo-dir "$PWD"
+
+# Scan the repo for bespoke or potentially sensitive setup details.
+bash scripts/run_neo_briefs.sh --json scan-repo-safety
 ```
 
-All three commands accept `--json` for machine-readable output, which
-is what the cron-based patterns above rely on.
+All commands accept `--json` for machine-readable output.
 
 ## 9. Starter thread message template
 
@@ -478,6 +500,7 @@ More detail and triage runbooks in [`docs/runbook.md`](docs/runbook.md).
 │   ├── notion-schema.md
 │   ├── discord-flow.md
 │   ├── obsidian.md
+│   ├── openclaw.md
 │   └── runbook.md
 ├── src/
 │   └── neo_research_briefs/
@@ -485,6 +508,8 @@ More detail and triage runbooks in [`docs/runbook.md`](docs/runbook.md).
 │       ├── config.py
 │       ├── models.py
 │       ├── cli.py
+│       ├── openclaw.py
+│       ├── safety.py
 │       ├── adapters/
 │       │   ├── __init__.py
 │       │   ├── notion.py
@@ -494,13 +519,21 @@ More detail and triage runbooks in [`docs/runbook.md`](docs/runbook.md).
 │       └── services/
 │           ├── __init__.py
 │           └── watcher.py
+├── scripts/
+│   ├── bootstrap.sh
+│   └── run_neo_briefs.sh
 ├── templates/
 │   └── obsidian/
 │       └── research-brief.md
 └── tests/
     ├── test_config.py
+    ├── test_discord.py
+    ├── test_github.py
     ├── test_models.py
-    └── test_obsidian.py
+    ├── test_notion.py
+    ├── test_obsidian.py
+    ├── test_openclaw.py
+    └── test_safety.py
 ```
 
 All four adapters are usable in v1. Notion, Discord, and GitHub talk

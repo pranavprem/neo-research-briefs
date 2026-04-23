@@ -16,15 +16,14 @@ pretending to).
 
 ## Starting from scratch on a new host
 
-1. `git clone` and `pip install -e '.[dev]'`.
-2. `cp .env.example .env` and fill in the adapters you use.
-3. `neo-briefs validate-config` - should report no problems.
-4. `neo-briefs obsidian` (if the vault adapter is enabled) - should
-   list briefs without parse errors.
-5. `neo-briefs run-once --dry-run` - should report the briefs that
-   *would* be claimed.
-6. Flip `NEO_BRIEFS_DRY_RUN=false` (or pass `--no-dry-run`) only when
-   the dry run matches your expectations.
+1. `git clone` the repo.
+2. `bash scripts/bootstrap.sh`.
+3. Edit `.env` for the adapters you use.
+4. `bash scripts/run_neo_briefs.sh --json validate-config` - should report no problems.
+5. `bash scripts/run_neo_briefs.sh --json obsidian` (if the vault adapter is enabled) - should list briefs without parse errors.
+6. `bash scripts/run_neo_briefs.sh --json run-once --dry-run` - should report the briefs that *would* be claimed.
+7. Flip `NEO_BRIEFS_DRY_RUN=false` (or pass `--no-dry-run`) only when the dry run matches your expectations.
+8. `bash scripts/run_neo_briefs.sh --json scan-repo-safety` before pushing any local customizations.
 
 ## Scheduled execution
 
@@ -32,23 +31,22 @@ Two supported patterns; pick one.
 
 ### OpenClaw cron
 
-```json
-{
-  "name": "research-brief-intake",
-  "schedule": { "kind": "every", "everyMs": 300000 },
-  "sessionTarget": "isolated",
-  "payload": {
-    "kind": "agentTurn",
-    "message": "Run `neo-briefs run-once`. Report the JSON summary."
-  },
-  "delivery": { "mode": "none" }
-}
+From the repo root:
+
+```bash
+bash scripts/run_neo_briefs.sh --json emit-openclaw-cron --repo-dir "$PWD"
+```
+
+That prints a ready-to-paste cron job object whose embedded command is:
+
+```bash
+bash scripts/run_neo_briefs.sh --json run-once
 ```
 
 ### System cron
 
 ```cron
-*/5 * * * * cd /srv/neo-research-briefs && . .venv/bin/activate && neo-briefs run-once --json >> logs/watcher.log 2>&1
+*/5 * * * * cd /srv/neo-research-briefs && bash scripts/run_neo_briefs.sh --json run-once >> logs/watcher.log 2>&1
 ```
 
 Five minutes is a sane default. Going faster will hit Discord rate
@@ -100,6 +98,12 @@ There is no stateful queue and no database. To "roll back" a bad run:
    cheapest source of truth).
 3. Close the GitHub issues.
 4. Flip the briefs back to `Want` or `Backlog`.
+
+## Pre-push hygiene
+
+- Run `bash scripts/run_neo_briefs.sh --json scan-repo-safety` before pushing.
+- Keep `.env` untracked and blank in `.env.example` for secret fields.
+- Replace private IPs, NAS hostnames, home-directory paths, and real Discord IDs with placeholders in docs.
 
 ## Observability
 

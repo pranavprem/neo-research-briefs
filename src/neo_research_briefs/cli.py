@@ -1,16 +1,21 @@
 """Command-line entry point.
 
-Three subcommands are intentional:
+Primary subcommands:
 
-- ``run-once``        - one watcher cycle; lives under cron or an OpenClaw
-                        scheduled session.
-- ``validate-config`` - prints every config problem in one shot; safe to
-                        run on any host before enabling a cron.
-- ``obsidian``        - scans the vault and reports which files parse,
-                        which do not, and which are eligible to claim.
+- ``run-once``            - one watcher cycle; lives under cron or an
+                            OpenClaw scheduled session.
+- ``validate-config``     - prints every config problem in one shot;
+                            safe to run on any host before enabling a cron.
+- ``obsidian``            - scans the vault and reports which files
+                            parse, which do not, and which are eligible
+                            to claim.
+- ``emit-openclaw-cron``  - prints a ready-to-paste OpenClaw cron job
+                            JSON object for this repo.
+- ``scan-repo-safety``    - scans the repo for bespoke or potentially
+                            sensitive setup details before push.
 
-All three respect ``--dry-run`` / ``--env-file`` / ``--json`` so that
-smoke tests and humans see the same output shape.
+All commands respect ``--env-file`` / ``--json`` so that smoke tests
+and humans see the same output shape.
 """
 
 from __future__ import annotations
@@ -24,6 +29,8 @@ from typing import Sequence
 
 from .adapters.obsidian import ObsidianAdapter
 from .config import Config, ConfigError, load_config
+from .openclaw import build_cron_job
+from .safety import scan_repo_for_bespoke_info
 from .services.watcher import Watcher, WatcherReport
 
 
@@ -78,6 +85,68 @@ def _build_parser() -> argparse.ArgumentParser:
         "--show-want-only",
         action="store_true",
         help="Print only briefs whose status matches OBSIDIAN_WANT_VALUE.",
+    )
+
+    cron = sub.add_parser(
+        "emit-openclaw-cron",
+        help="Emit a ready-to-paste OpenClaw cron job JSON object.",
+    )
+    cron.add_argument(
+        "--repo-dir",
+        type=Path,
+        default=Path.cwd(),
+        help="Path to the checked-out repo on the watcher host.",
+    )
+    cron.add_argument(
+        "--cron-env-file",
+        type=Path,
+        default=None,
+        help="Optional .env path for the wrapper command embedded in the cron prompt.",
+    )
+    cron.add_argument(
+        "--every-minutes",
+        type=int,
+        default=5,
+        help="Run interval in minutes.",
+    )
+    cron.add_argument(
+        "--session-target",
+        default="isolated",
+        help="OpenClaw cron sessionTarget value, usually isolated or current.",
+    )
+    cron.add_argument(
+        "--delivery-mode",
+        default="none",
+        help="OpenClaw cron delivery.mode value.",
+    )
+    cron.add_argument(
+        "--job-name",
+        default="research-brief-intake",
+        help="Human-readable cron job name.",
+    )
+    cron.add_argument(
+        "--dry-run",
+        dest="cron_dry_run",
+        action="store_true",
+        default=None,
+        help="Force the embedded command to run the watcher in dry-run mode.",
+    )
+    cron.add_argument(
+        "--no-dry-run",
+        dest="cron_dry_run",
+        action="store_false",
+        help="Force the embedded command to run the watcher live.",
+    )
+
+    safety = sub.add_parser(
+        "scan-repo-safety",
+        help="Scan the repo for bespoke or potentially sensitive setup info.",
+    )
+    safety.add_argument(
+        "--root",
+        type=Path,
+        default=Path.cwd(),
+        help="Repo root to scan.",
     )
 
     return parser
@@ -191,6 +260,48 @@ def _cmd_obsidian(args: argparse.Namespace, config: Config, *, json_out: bool) -
     return 0 if not problems else 1
 
 
+def _cmd_emit_openclaw_cron(args: argparse.Namespace, *, json_out: bool) -> int:
+    try:
+        job = build_cron_job(
+            args.repo_dir,
+            env_file=args.cron_env_file,
+            every_minutes=args.every_minutes,
+            session_target=args.session_target,
+            delivery_mode=args.delivery_mode,
+            job_name=args.job_name,
+            dry_run=args.cron_dry_run,
+        )
+    except ValueError as exc:
+        _emit(str(exc), json_out=json_out, payload={"error": str(exc)})
+        return 2
+
+    print(json.dumps(job, indent=2))
+    return 0
+
+
+def _cmd_scan_repo_safety(args: argparse.Namespace, *, json_out: bool) -> int:
+    findings = scan_repo_for_bespoke_info(args.root)
+    payload = {
+        "root": str(args.root.resolve()),
+        "ok": not findings,
+        "findings": [asdict(finding) for finding in findings],
+    }
+    if json_out:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Scanning {payload['root']}")
+        if not findings:
+            print("No bespoke or potentially sensitive setup details found.")
+        else:
+            print(f"Found {len(findings)} possible issue(s):")
+            for finding in findings:
+                print(
+                    f"  - {finding.path}:{finding.line} [{finding.kind}] {finding.match}\n"
+                    f"      {finding.snippet}"
+                )
+    return 0 if not findings else 1
+
+
 # ---------------------------------------------------------------------------
 # Rendering helpers
 
@@ -247,6 +358,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             env_file = default
 
     json_out = bool(args.json)
+
+    if args.command == "emit-openclaw-cron":
+        return _cmd_emit_openclaw_cron(args, json_out=json_out)
+    if args.command == "scan-repo-safety":
+        return _cmd_scan_repo_safety(args, json_out=json_out)
+
     try:
         config = load_config(dotenv_path=env_file)
     except ConfigError as exc:

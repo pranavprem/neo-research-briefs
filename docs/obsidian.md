@@ -37,7 +37,7 @@ status: want
 summary: Investigate pgvector-scale's claims against pgvector for 10M+ vectors.
 why_it_matters: We are about to commit to an index type; switching later is costly.
 source_url: https://example.com/pgvector-scale-announcement
-target_repo: pranavprem/embeddings-bench
+target_repo: your-org/embeddings-bench
 tags:
   - database
   - embeddings
