@@ -57,6 +57,26 @@ Treat the workflow like this:
   repo change
 - Brief moves to **Review** and then **Done**
 
+## Production notes from a live deployment
+
+The v1 reference implementation in this repo is intentionally small and
+clean. A hardened production deployment should usually add a few extra
+safety rails:
+
+- run one dedicated intake command or service from cron, rather than
+  asking a general assistant prompt to re-decide the workflow each run,
+- take a cross-run lock so overlapping cron runs cannot double-claim
+  the same brief,
+- reuse an existing kickoff post or Discord thread when partial
+  write-back already happened,
+- make the thread open with a useful first-pass implementation take,
+  not just bookkeeping,
+- treat one failed fetch or enrichment step as a recoverable problem,
+  not a reason to duplicate or abandon the brief.
+
+In other words, use this repo as the clean baseline, then harden the
+last mile once the workflow is live.
+
 ## Prerequisites
 
 You need:
@@ -237,6 +257,9 @@ You have three good patterns.
 - It posts a starter message.
 - It exits.
 
+Treat this as a dedicated intake command, not as a vague prompt loop.
+Cron should invoke one predictable entrypoint each run.
+
 Use this if you only want intake automation.
 
 ### Pattern B: watcher plus background worker
@@ -334,6 +357,10 @@ Recommended protections:
 - if a GitHub issue already exists, do not create another,
 - if thread creation fails, write the error back clearly,
 - only move back to `Want` manually or with an explicit retry rule.
+
+If your cron can overlap with itself in production, add a real cross-run
+lock before the query and claim steps. The clean reference watcher keeps
+state minimal; a live deployment may need that extra fence.
 
 Every write the Obsidian adapter performs uses `tempfile + os.replace`
 so a crash never leaves half a frontmatter block on disk. See
